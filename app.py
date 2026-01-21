@@ -46,7 +46,11 @@ def one_click_generate(uploaded_image=None):
 
 def render_page_layout():
     """渲染页面UI（核心UI逻辑）"""
-    st.title("🎬 导演级分镜生成器（小说漫改专属·通用优化版）")
+    st.markdown("""
+<h1 style='text-align: center; margin-bottom: 2rem;'>
+🎬 导演级分镜生成器（小说漫改专属）
+</h1>
+""", unsafe_allow_html=True)
     
     # 顶部导航栏
     tab1, tab2 = st.tabs(["📝 分镜生成", "ℹ️ 使用指南"])
