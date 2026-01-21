@@ -21,7 +21,7 @@
 - 依赖库：见`requirements.txt`
 
 ## 🚀 快速开始
-### 1. 安装依赖
+### 1. 结构说明
 ```bash
 pip install -r requirements.txt
 ycf-sui/
