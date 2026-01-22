@@ -154,11 +154,32 @@ def _call_volcengine_api(base_url, api_key, model, prompt, temperature, uploaded
             st.error(error_msg)
             return None
 
+    except requests.exceptions.HTTPError as e:
+        error_detail = f"HTTP {response.status_code}: {response.text[:500]}" if 'response' in locals() else str(e)
+        full_error = f"LLM调用HTTP错误：{error_detail}，请求URL: {base_url}，模型: {model}"
+        logging.error(full_error)
+        st.error(f"❌ API调用失败：{error_detail}")
+        raise
+    except requests.exceptions.Timeout:
+        timeout_error = f"LLM调用超时（超过180秒）：请求URL: {base_url}，模型: {model}"
+        logging.error(timeout_error)
+        st.error("❌ API调用超时（超过180秒）")
+        raise
+    except requests.exceptions.ConnectionError as e:
+        conn_error = f"LLM连接错误：{str(e)}，请求URL: {base_url}，模型: {model}"
+        logging.error(conn_error)
+        st.error(f"❌ API连接错误：{str(e)}")
+        raise
+    except ValueError as e:  # JSON解析错误
+        json_error = f"LLM响应JSON解析错误：{str(e)}，响应内容: {response.text[:500] if 'response' in locals() else 'N/A'}，请求URL: {base_url}，模型: {model}"
+        logging.error(json_error)
+        st.error(f"❌ API响应解析错误：{str(e)}")
+        raise
     except Exception as e:
         general_error = f"LLM调用异常：{str(e)}，请求URL: {base_url}，模型: {model}，错误类型: {type(e).__name__}"
         logging.error(general_error)
         st.error(f"❌ API调用异常：{str(e)}")
-        return None
+        raise
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_openai_compatible_api(base_url, api_key, model, prompt, temperature, uploaded_image, mode, is_comic_creation=False):

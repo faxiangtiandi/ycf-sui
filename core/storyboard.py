@@ -1,7 +1,7 @@
 import streamlit as st
 import json
-# 关键修复：导入call_llm函数（根据你的代码结构调整导入路径）
-from .llm import call_llm  # 假设call_llm在llm.py文件中
+from .llm import call_llm
+from .generator import parse_storyboards_from_raw, generate_universal_image_prompt  # 导入缺失的函数
 
 def extract_novel_core_elements(novel_text, uploaded_image=None):
     """
@@ -41,7 +41,7 @@ def extract_novel_core_elements(novel_text, uploaded_image=None):
     小说文本：
     {novel_text[:2000]}"""
     
-    # 修复：调用正确的call_llm函数，补充is_comic_creation参数（默认False）
+    # 调用LLM获取结果
     result = call_llm(prompt, temperature=0.3, uploaded_image=uploaded_image, is_comic_creation=False)
     
     if not result:
@@ -100,12 +100,10 @@ def generate_storyboards(auto=False, uploaded_image=None):
         
         # 分析小说类型和复杂度
         type_prompt = f"分析以下文本的类型，仅返回类型名称：\n{st.session_state.novel_target_chapter[:2000]}"
-        # 修复：拼写错误，改为call_llm并补充参数
         st.session_state.novel_type = call_llm(type_prompt, uploaded_image=uploaded_image, is_comic_creation=True) or "未知类型"
         
         complexity_prompt = f"""分析以下文本的情节复杂度，仅返回结果（动作/特效密集型、对话/心理型、均衡型）：
         文本：{st.session_state.novel_target_chapter[:2000]}"""
-        # 修复：拼写错误，改为call_llm
         complexity = call_llm(complexity_prompt, temperature=0.3, uploaded_image=uploaded_image, is_comic_creation=True) or "均衡型"
         st.session_state.complexity = complexity
         
@@ -116,272 +114,90 @@ def generate_storyboards(auto=False, uploaded_image=None):
             return False
         
         # 生成推荐导演的智能体人格
-        director_persona = generate_director_intelligent_persona(recommended_director, st.session_state.novel_type, complexity, st.session_state.complexity)
+        director_persona = generate_director_persona(recommended_director, st.session_state.novel_type, complexity, st.session_state.complexity)
         st.session_state.director_persona = director_persona
         
         # 构建视觉风格指令
         director_style = st.session_state.director_persona or "冷青灰高对比色调，阴影厚重占比60%，构图紧凑留白少"
-        style_tags = st.session_state.director_style_tags or []
-        visual_style = f"{director_style}，{','.join(style_tags)}，贴合{st.session_state.novel_type}题材"
         
-        # 分镜密度规则
-        if complexity == "动作/特效密集型":
-            density_rule = "分镜密度偏高，每20-40字对应1个镜头，注重动作拆解细节"
-        elif complexity == "对话/心理型":
-            density_rule = "分镜密度适中，每30-50字对应1个镜头，突出情绪和心理变化"
-        else:
-            density_rule = "分镜密度偏高，每25-45字对应1个镜头，确保节奏流畅"
+        # 生成分镜
+        prompt = f"""作为专业的分镜设计师，请根据以下信息生成分镜脚本：
+        - 小说类型：{st.session_state.novel_type}
+        - 情节复杂度：{st.session_state.complexity}
+        - 导演风格：{director_style}
+        - 核心人物：{core_elements['main_characters'][0]['name']}，{core_elements['main_characters'][0]['gender']}，{core_elements['main_characters'][0]['age']}，{core_elements['main_characters'][0]['appearance']}
+        - 关键场景：{core_elements['key_scenes'][0]['scene_name']}，{core_elements['key_scenes'][0]['spatial_relations']}，{core_elements['key_scenes'][0]['environment']}，{core_elements['key_scenes'][0]['emotion']}
+        - 情节要点：{core_elements['plot_points'][0]['point']}，{core_elements['plot_points'][0]['type']}
 
-        # 题材专属规则
-        if "修仙" in st.session_state.novel_type or "古风" in st.session_state.novel_type:
-            genre_specific = "适配修仙/古风：动作拆分为起手→释放→收尾→效果延续，场景强化古风细节和意境"
-        elif "科幻" in st.session_state.novel_type:
-            genre_specific = "适配科幻：机械动作拆分为启动→运行→停止→余效，场景强化科技感和未来感"
-        elif "悬疑" in st.session_state.novel_type:
-            genre_specific = "适配悬疑：视觉节点拆分为铺垫→暗示→转折→爆发→余韵，场景强化空间层次感和心理压迫感"
-        else:
-            genre_specific = "适配通用题材：视觉节点拆分为起承转合，保持自然的空间关系和情绪递进"
+        请按照以下格式输出分镜：
+        镜头1：[镜头描述]
+        【中文结构化提示词（文生图专用）】
+        风格描述：[风格描述]
+        镜头方向：[镜头方向]
+        艺术风格：[艺术风格]
+        画质要求：[画质要求]
+        人物特征：[人物特征]
+        场景细节：[场景细节]
+        【英文结构化提示词（文生图专用）】
+        [英文提示词]
+        【图生视频专用提示词】
+        [视频提示词]
+        ===== 分割线：下一个镜头 =====
+        """
         
-        # 构建最终分镜提示词
-        final_prompt = f"""你是资深漫画家兼动态漫分镜师，正与【{recommended_director}】合作，基于其独特艺术风格（视觉风格：{visual_style}），为小说生成结构化分镜：
-
-【智能体人格融合】
-{recommended_director}的创作风格与理念：
-{director_persona}
-
-【核心规则1：漫画分镜逻辑】
-1.  {density_rule}，确保充分展现情节细节（单章1500-2500字对应80-120个镜头，以适应漫画阅读节奏）；
-2.  视觉节点必拆：表情微变、动作衔接、场景切换、道具细节、特效爆发、情绪转换、心理活动、环境氛围变化；
-3.  {genre_specific}。
-
-【核心规则2：人物/空间约束（必须严格遵守）】
-1.  核心人物特征保持一致：姓名、性别、年龄、外貌特征在所有镜头中统一；
-2.  空间关系清晰：明确区分室内/室外、前景/背景、近/远等空间层次；
-3.  悬浮/外部物体：必须远离主体至少5米，不得与主体/玻璃/墙面融合；
-4.  避免人物混淆：不同角色的特征差异明显，不得出现性别/年龄错乱。
-
-【核心规则3：漫画逻辑适配】
-1.  镜头语言多样化：特写、近景、中景、远景、俯视、仰视、侧面、背面等多样化运用；
-2.  情绪表达强化：重点情绪时刻需用特写或细节镜头放大；
-3.  节奏控制：紧张情节快切，舒缓情节慢镜，对话场景注重人物互动细节；
-4.  视角转换：适当运用主观视角、客观视角、分割画面等漫画常用技法。
-
-【核心规则4：漫画家专业视角】
-1.  分镜布局：考虑漫画格子布局，注重画面平衡和视觉流向；
-2.  人物构图：突出主角位置，合理安排人物与背景比例；
-3.  对话处理：对话场景需突出说话者表情和听者反应；
-4.  动作分解：复杂动作需分解为多个连续镜头，确保流畅性；
-5.  氛围营造：通过光影、色彩、背景细节强化情绪氛围；
-6.  节奏引导：通过镜头大小、角度变化引导读者阅读节奏。
-
-【核心规则5：格式要求】
-每个镜头按以下模板输出，镜头序号从1开始，前缀标注"镜头X：[核心情节，8字内]"，镜头间用"===== 分割线：下一个镜头 ====="分隔：
-镜头X：[核心情节]
-【中文结构化提示词（文生图专用）】
-风格描述：{st.session_state.novel_type}题材，{visual_style}，贴合小说情绪
-镜头方向：[景别+拍摄角度]
-艺术风格：[色调+构图+氛围]
-画质要求：8K超高清，电影级质感，[细节要求]
-人物特征：[固定形象+当前动作/表情]
-场景细节：[完整布局+道具细节+清晰的空间关系]
-【英文结构化提示词（文生图专用）】
-Style Description: {st.session_state.novel_type} theme, {visual_style.replace("，", ", ")}, fits the novel's mood
-Camera Direction: [Shot type + angle]
-Art Style: [Color + composition + atmosphere]
-Quality Requirements: 8K ultra HD, cinematic texture, [English detail]
-Character Features: [Fixed image + current action/expression]
-Scene Details: [Full layout + prop details + clear spatial relationships]
-【图生视频专用提示词】
-Video Prompt: [文生图英文提示词] + , 1-2s duration per shot, 24fps, natural motion, [运镜描述]
-
-【当前小说原文】
-{st.session_state.novel_target_chapter}
-
-【输出示例（通用）】
-镜头1：主角站立窗前
-【中文结构化提示词（文生图专用）】
-风格描述：悬疑题材，冷青灰高对比色调，阴影厚重占比60%，贴合悬疑氛围
-镜头方向：近景，平视角度
-艺术风格：冷青色调，构图紧凑，紧张氛围
-画质要求：8K超高清，电影级质感，皮肤纹理可见，暗部细节清晰
-人物特征：20岁女性主角，黑色长发，休闲家居服，侧身站立，眼神警惕
-场景细节：客厅窗边，室内昏暗，窗外5米处悬浮模糊人影，空间层次清晰
-【英文结构化提示词（文生图专用）】
-Style Description: Suspense theme, cool blue-gray high contrast tones, heavy shadows accounting for 60%, fits suspense atmosphere
-Camera Direction: Medium shot, eye-level angle
-Art Style: Cool cyan tones, tight composition, tense atmosphere
-Quality Requirements: 8K ultra HD, cinematic texture, visible skin texture, clear dark details
-Character Features: 20-year-old female protagonist, long black hair, casual home wear, standing sideways, alert eyes
-Scene Details: Living room by window, dim indoor lighting, blurry figure floating 5 meters outside the window, clear spatial hierarchy
-【图生视频专用提示词】
-Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast tones, heavy shadows accounting for 60%, fits suspense atmosphere; Camera Direction: Medium shot, eye-level angle; Art Style: Cool cyan tones, tight composition, tense atmosphere; Quality Requirements: 8K ultra HD, cinematic texture, visible skin texture, clear dark details; Character Features: 20-year-old female protagonist, long black hair, casual home wear, standing sideways, alert eyes; Scene Details: Living room by window, dim indoor lighting, blurry figure floating 5 meters outside the window, clear spatial hierarchy, 1.5s duration per shot, 24fps, natural motion, smooth pan from hand to face
-===== 分割线：下一个镜头 =====
-"""
+        result = call_llm(prompt, temperature=0.7, uploaded_image=uploaded_image, is_comic_creation=True)
         
-        # 修复：拼写错误，改为call_llm
-        raw_response = call_llm(final_prompt, temperature=0.4, uploaded_image=uploaded_image, is_comic_creation=True)
-        
-        if not raw_response or st.session_state.stop_flag:
-            if not st.session_state.stop_flag:
-                st.warning("⚠️ 分镜生成失败！")
+        if not result:
+            st.error("❌ 分镜生成失败，请检查API配置")
             st.session_state.is_running = False
             return False
         
-        # 解析原始分镜
-        raw_clean = raw_response.strip()
-        storyboard_parts = [part.strip() for part in raw_clean.split("===== 分割线：下一个镜头 =====") if part.strip()]
+        # 解析分镜结果
+        storyboards = parse_storyboards_from_raw(result, core_elements, st.session_state.novel_type, director_style)
+        st.session_state.storyboards = storyboards
         
-        try:
-            storyboards = []
-            comfy_prompts = []
-            video_prompts = []
-            optimized_prompts = []
-            negative_prompts = []
-            
-            # 导入coregenerator的核心函数（生成通用提示词）
-            from core.coregenerator import generate_universal_image_prompt, optimize_prompt_for_ai
-            
-            for idx, part in enumerate(storyboard_parts):
-                # 过滤无效分镜
-                if not ("【中文结构化提示词（文生图专用）】" in part and "【英文结构化提示词（文生图专用）】" in part and "【图生视频专用提示词】" in part):
-                    continue
-                
-                # 解析镜头前缀
-                scene_prefix_lines = [line.strip() for line in part.split("\n") if line.strip().startswith("镜头")]
-                if not scene_prefix_lines:
-                    continue
-                scene_prefix = scene_prefix_lines[0]
-                if "：" not in scene_prefix:
-                    continue
-                scene_num = scene_prefix.split("：")[0]
-                scene_core = scene_prefix.split("：")[1]
-                
-                # 解析中文提示词
-                try:
-                    cn_part = part.split("【中文结构化提示词（文生图专用）】")[1].split("【英文结构化提示词（文生图专用）】")[0].strip()
-                except IndexError:
-                    continue
-                    
-                style_desc_cn = ""
-                camera_cn = ""
-                art_style_cn = ""
-                quality_cn = ""
-                character_cn = ""
-                scene_cn = ""
-                
-                for line in cn_part.split("\n"):
-                    line = line.strip()
-                    if line.startswith("风格描述："):
-                        style_desc_cn = line.replace("风格描述：", "")
-                    elif line.startswith("镜头方向："):
-                        camera_cn = line.replace("镜头方向：", "")
-                    elif line.startswith("艺术风格："):
-                        art_style_cn = line.replace("艺术风格：", "")
-                    elif line.startswith("画质要求："):
-                        quality_cn = line.replace("画质要求：", "")
-                    elif line.startswith("人物特征："):
-                        character_cn = line.replace("人物特征：", "")
-                    elif line.startswith("场景细节："):
-                        scene_cn = line.replace("场景细节：", "")
-                
-                # 解析英文和视频提示词
-                try:
-                    en_part = part.split("【英文结构化提示词（文生图专用）】")[1].split("【图生视频专用提示词】")[0].strip()
-                    video_part = part.split("【图生视频专用提示词】")[1].strip()
-                except IndexError:
-                    continue
-                
-                # 解析情绪标签
-                emotion = "平静"
-                if "疑惑" in character_cn or "好奇" in style_desc_cn:
-                    emotion = "疑惑"
-                elif "惊恐" in character_cn or "惊悚" in style_desc_cn:
-                    emotion = "惊恐"
-                elif "无助" in character_cn or "绝望" in style_desc_cn:
-                    emotion = "无助"
-                elif "悲伤" in character_cn:
-                    emotion = "悲伤"
-                elif "喜悦" in character_cn:
-                    emotion = "喜悦"
-                
-                # 生成通用提示词
-                scene_info = {
-                    "scene_core": scene_core,
-                    "emotion": emotion,
-                    "camera": camera_cn,
-                    "atmosphere": art_style_cn,
-                    "character_feature": character_cn,
-                    "environment": scene_cn,
-                    "visual_style": visual_style
-                }
-                universal_prompt = generate_universal_image_prompt(scene_info, core_elements)
-                
-                # 组装分镜数据
-                storyboard_item = {
-                    "scene": f"{scene_prefix}\n{cn_part}",
-                    "emotion": emotion,
-                    "camera": camera_cn if camera_cn else "中景，平视角度",
-                    "atmosphere": art_style_cn if art_style_cn else "贴合题材氛围",
-                    "has_character": "是" if character_cn and character_cn != "无" else "否",
-                    "character_feature": character_cn if character_cn else "贴合题材人物特征",
-                    "environment": scene_cn if scene_cn else "贴合题材场景细节",
-                    "comfyui_prompt": en_part,
-                    "video_prompt": video_part,
-                    "optimized_prompt": universal_prompt["positive"],
-                    "negative_prompt": universal_prompt["negative"]
-                }
-                
-                # 确保字段完整性
-                if "scene" not in storyboard_item:
-                    storyboard_item["scene"] = scene_prefix
-                if "emotion" not in storyboard_item:
-                    storyboard_item["emotion"] = "平静"
-                if "camera" not in storyboard_item:
-                    storyboard_item["camera"] = "中景，平视角度"
-                if "atmosphere" not in storyboard_item:
-                    storyboard_item["atmosphere"] = "贴合题材氛围"
-                if "has_character" not in storyboard_item:
-                    storyboard_item["has_character"] = "否"
-                if "character_feature" not in storyboard_item:
-                    storyboard_item["character_feature"] = "贴合题材人物特征"
-                if "environment" not in storyboard_item:
-                    storyboard_item["environment"] = "贴合题材场景细节"
-                if "optimized_prompt" not in storyboard_item:
-                    storyboard_item["optimized_prompt"] = ""
-                if "negative_prompt" not in storyboard_item:
-                    storyboard_item["negative_prompt"] = ""
-                if "comfyui_prompt" not in storyboard_item:
-                    storyboard_item["comfyui_prompt"] = ""
-                if "video_prompt" not in storyboard_item:
-                    storyboard_item["video_prompt"] = ""
-                
-                storyboards.append(storyboard_item)
-                comfy_prompts.append(en_part)
-                video_prompts.append(video_part)
-                optimized_prompts.append(universal_prompt["positive"])
-                negative_prompts.append(universal_prompt["negative"])
-            
-            # 保存分镜数据
-            if len(storyboards) == 0:
-                st.error("❌ 未解析到有效分镜！")
-            else:
-                st.success(f"✅ 分镜生成成功！共{len(storyboards)}个镜头")
-            
-            st.session_state.storyboards = storyboards
-            st.session_state.comfyui_prompts = comfy_prompts
-            st.session_state.video_prompts = video_prompts
-            st.session_state.optimized_prompts = optimized_prompts
-            st.session_state.negative_prompt = negative_prompts[0] if negative_prompts else ""
-            
-            st.session_state.is_running = False
-            return True
-        except Exception as e:
-            st.error(f"❌ 分镜解析失败！错误：{str(e)}")
-            st.session_state.is_running = False
-            return False
+        # 生成优化后的提示词
+        optimized_prompts = []
+        for sb in storyboards:
+            optimized_prompt = generate_universal_image_prompt(
+                {
+                    "scene_core": sb["scene_core"],
+                    "emotion": sb["emotion"],
+                    "camera": sb["camera"],
+                    "atmosphere": sb["atmosphere"],
+                    "character_feature": sb["character_feature"],
+                    "environment": sb["environment"],
+                    "visual_style": director_style
+                },
+                core_elements
+            )["positive"]
+            optimized_prompts.append(optimized_prompt)
+        
+        st.session_state.optimized_prompts = optimized_prompts
+        
+        # 生成ComfyUI提示词
+        comfyui_prompts = []
+        for sb in storyboards:
+            comfyui_prompts.append(sb["comfyui_prompt"])
+        
+        st.session_state.comfyui_prompts = comfyui_prompts
+        
+        # 生成视频提示词
+        video_prompts = []
+        for sb in storyboards:
+            video_prompts.append(sb["video_prompt"])
+        
+        st.session_state.video_prompts = video_prompts
+        
+        # 生成负向提示词
+        negative_prompt = generate_universal_image_prompt({}, core_elements)["negative"]
+        st.session_state.negative_prompt = negative_prompt
+        
+        st.session_state.is_running = False
+        return True
 
 
-def generate_director_intelligent_persona(director_name, novel_type, complexity, adapt_demand):
+def generate_director_persona(director_name, novel_type, complexity, adapt_demand):
     """
     根据推荐的导演名称生成智能体人格
     :param director_name: 推荐的导演名称
@@ -587,7 +403,6 @@ def generate_director_intelligent_persona(director_name, novel_type, complexity,
 
 要求：内容贴合导演真实风格+题材需求，每条简洁精准。"""
 
-    # 修复：拼写错误，改为call_llm并补充is_comic_creation参数
     result = call_llm(prompt, temperature=0.6, is_comic_creation=True)
     if result:
         # 生成题材专属标签
@@ -731,14 +546,14 @@ def apply_validation_suggestions():
 3. 保持分镜的连贯性和流畅性
 4. 优化人物特征、空间关系、情绪表达的一致性
 
-请使用与原始分镜相同的格式输出。"""
+Please use与原始分镜相同的 format output。"""
 
             # 调用大模型重新生成优化后的分镜
             refined_result = call_llm(refine_prompt, temperature=0.6, is_comic_creation=True)
 
             if refined_result:
                 # 解析优化后的分镜
-                from core.coregenerator import parse_storyboards_from_raw
+                from core.generator import parse_storyboards_from_raw
                 refined_storyboards = parse_storyboards_from_raw(
                     refined_result, 
                     core_elements=extract_novel_core_elements(novel_content)

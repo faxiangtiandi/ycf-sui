@@ -1,5 +1,6 @@
 import uuid
 import streamlit as st
+import streamlit.components.v1 as components
 import logging
 from .utils import API_PRESETS  # 从 utils.py 导入 API_PRESETS，避免重复定义
 
@@ -49,6 +50,70 @@ def copy_to_clipboard_button(text, button_label="📋 复制", key_suffix=""):
         st.session_state[f"copy_status_{unique_key}"] = False
         st.rerun()
 
+def storyboard_toggle_button():
+    """
+    生成分镜内容的「折叠/展开」一键切换按钮
+    适配 Streamlit 渲染逻辑，支持批量控制所有分镜块的折叠状态
+    """
+    # 自定义JS逻辑：切换所有折叠面板的状态
+    toggle_js = """
+    <script>
+    // 定义全局状态，记录当前是展开/折叠
+    let isExpanded = true;
+    
+    // 切换按钮点击事件
+    function toggleAllStoryboards() {
+        // 获取所有Streamlit折叠面板的触发按钮
+        const expanders = document.querySelectorAll('button[aria-label^="Expand"]');
+        const collapseButtons = document.querySelectorAll('button[aria-label^="Collapse"]');
+        
+        if (isExpanded) {
+            // 切换为折叠状态：点击所有展开面板的折叠按钮
+            collapseButtons.forEach(btn => btn.click());
+            document.getElementById('toggle-btn').innerText = '📢 一键展开所有分镜';
+        } else {
+            // 切换为展开状态：点击所有折叠面板的展开按钮
+            expanders.forEach(btn => btn.click());
+            document.getElementById('toggle-btn').innerText = '📥 一键折叠所有分镜';
+        }
+        isExpanded = !isExpanded;
+    }
+    </script>
+    
+    <!-- 自定义切换按钮样式（适配Streamlit主题） -->
+    <button 
+        id="toggle-btn" 
+        onclick="toggleAllStoryboards()"
+        style="
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            margin: 10px 0;
+            width: 100%;
+            text-align: center;
+        "
+    >
+        📥 一键折叠所有分镜
+    </button>
+    """
+    # 渲染按钮和JS逻辑
+    components.html(toggle_js, height=50)
+
+def render_storyboard_block(storyboard_id, content, title="分镜内容"):
+    """
+    渲染单个分镜块（带折叠功能）
+    :param storyboard_id: 分镜唯一标识（如分镜1/分镜2）
+    :param content: 分镜长文本内容
+    :param title: 分镜块标题
+    """
+    with st.expander(f"{title} - {storyboard_id}", expanded=True):
+        # 渲染分镜内容（支持换行、格式保留）
+        st.markdown(content, unsafe_allow_html=True)
+
 def init_basic_config():
     """初始化页面基础配置（VS深色主题）"""
     # 日志配置
@@ -74,6 +139,9 @@ def init_basic_config():
         margin: 0 auto !important;
         padding: 1rem 2rem !important;
         background-color: #1e1e1e !important;
+        display: flex; /* 添加flex布局 */
+        flex-wrap: wrap; /* 允许换行 */
+        justify-content: space-between; /* 子元素之间等宽排列 */
     }
     /* 标题样式（VS蓝强调） */
     h1, h2, h3, h4 {
@@ -108,6 +176,7 @@ def init_basic_config():
         border: 1px solid #3d3d3d !important;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2) !important;
         transition: all 0.2s ease !important;
+        width: calc(50% - 1.5rem); /* 每个卡片占一半宽度，减去margin */
     }
     .stContainer [data-testid="stVerticalBlock"]:hover {
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3) !important;
@@ -304,8 +373,12 @@ def init_session_state():
     if not st.session_state.multimodal_mode_model.strip():
         st.session_state.multimodal_mode_model = API_PRESETS[st.session_state.multimodal_mode_api_provider]["default_model"]
 
-def check_config_valid(mode: str) -> bool:
+def check_config_valid(mode: str = None) -> bool:
     """校验指定模式的API配置是否有效"""
+    # 如果没有指定模式，使用当前选中的模式
+    if mode is None:
+        mode = st.session_state.selected_mode
+    
     if mode == "text_mode":
         return (
             bool(st.session_state.text_mode_api_key.strip()) and
