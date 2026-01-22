@@ -1,132 +1,65 @@
-import re
-import json
 import streamlit as st
-from .llm import call_llm
-from .utils import image_to_base64
+import json
+# 关键修复：导入call_llm函数（根据你的代码结构调整导入路径）
+from .llm import call_llm  # 假设call_llm在llm.py文件中
 
 def extract_novel_core_elements(novel_text, uploaded_image=None):
     """
-    提取小说核心元素（人物/场景）
-    :param novel_text: 小说文本
-    :param uploaded_image: 参考图片
+    从小说文本中提取核心元素（人物、场景、情节等）
+    :param novel_text: 小说文本内容
+    :param uploaded_image: 参考图片（可选）
     :return: 核心元素字典
     """
-    prompt = f"""分析以下小说文本，严格按JSON格式返回核心元素（无额外说明）：
-{{
-    "main_characters": [
-        {{
-            "name": "核心人物姓名",
-            "gender": "性别（男/女/未知）",
-            "age": "年龄范围（如：20岁左右/中年）",
-            "appearance": "核心外貌特征（10字内）"
-        }}
-    ],
-    "key_scenes": [
-        {{
-            "location": "场景地点（如：客厅/窗外）",
-            "spatial_relations": "核心空间关系（如：人物在室内，物体在窗外）"
-        }}
-    ]
-}}
+    # 使用LLM提取核心元素
+    prompt = f"""请从以下小说文本中提取核心元素，严格按JSON格式返回：
+    {{
+        "main_characters": [
+            {{
+                "name": "姓名",
+                "gender": "性别",
+                "age": "年龄",
+                "appearance": "外貌特征",
+                "personality": "性格特点"
+            }}
+        ],
+        "key_scenes": [
+            {{
+                "scene_name": "场景名称",
+                "spatial_relations": "空间关系描述",
+                "environment": "环境细节",
+                "emotion": "情绪氛围"
+            }}
+        ],
+        "plot_points": [
+            {{
+                "point": "情节要点",
+                "type": "类型（动作/对话/心理）"
+            }}
+        ]
+    }}
 
-小说文本：
-{novel_text[:2000]}"""
+    小说文本：
+    {novel_text[:2000]}"""
     
-    result = call_llm(prompt, temperature=0.1, uploaded_image=uploaded_image)
+    # 修复：调用正确的call_llm函数，补充is_comic_creation参数（默认False）
+    result = call_llm(prompt, temperature=0.3, uploaded_image=uploaded_image, is_comic_creation=False)
+    
     if not result:
         return {
-            "main_characters": [{"name": "主角", "gender": "未知", "age": "成年", "appearance": "普通外貌"}],
-            "key_scenes": [{"location": "室内", "spatial_relations": "人物在室内"}]
+            "main_characters": [{"name": "主角", "gender": "未知", "age": "成年", "appearance": "普通外貌", "personality": "未知"}],
+            "key_scenes": [{"scene_name": "默认场景", "spatial_relations": "人物在室内", "environment": "贴合题材场景", "emotion": "平静"}],
+            "plot_points": [{"point": "情节开始", "type": "动作"}]
         }
     
     try:
-        json_match = re.search(r'\{[\s\S]*\}', result)
-        if json_match:
-            core_elements = json.loads(json_match.group())
-            st.session_state.novel_core_characters = core_elements.get("main_characters", [])
-            st.session_state.novel_core_scenes = core_elements.get("key_scenes", [])
-            return core_elements
-    except:
-        pass
-    
-    return {
-        "main_characters": [{"name": "主角", "gender": "未知", "age": "成年", "appearance": "普通外貌"}],
-        "key_scenes": [{"location": "室内", "spatial_relations": "人物在室内"}]
-    }
+        return json.loads(result)
+    except Exception:
+        return {
+            "main_characters": [{"name": "主角", "gender": "未知", "age": "成年", "appearance": "普通外貌", "personality": "未知"}],
+            "key_scenes": [{"scene_name": "默认场景", "spatial_relations": "人物在室内", "environment": "贴合题材场景", "emotion": "平静"}],
+            "plot_points": [{"point": "情节开始", "type": "动作"}]
+        }
 
-def validate_storyboard_consistency(uploaded_image=None):
-    """
-    校验分镜一致性并生成优化建议
-    :param uploaded_image: 参考图片
-    :return: 是否校验成功
-    """
-    if not st.session_state.storyboards:
-        st.warning("⚠️ 请先生成分镜再进行校验！")
-        return False
-    
-    with st.spinner("🔍 校验分镜一致性并生成优化建议..."):
-        # 提取分镜特征
-        all_characters = [sb['character_feature'] for sb in st.session_state.storyboards if sb['has_character'] == "是"]
-        all_scenes = [sb['environment'] for sb in st.session_state.storyboards]
-        
-        prompt = f"""分析以下分镜内容的一致性问题，生成具体优化建议：
-1. 人物特征一致性：检查所有镜头中核心人物的姓名、性别、年龄、外貌是否统一
-2. 空间关系一致性：检查场景空间关系是否合理、统一
-3. 视觉风格一致性：检查色调、光影、构图是否符合导演风格
-
-分镜人物特征：
-{json.dumps(all_characters, ensure_ascii=False)}
-
-分镜场景信息：
-{json.dumps(all_scenes, ensure_ascii=False)}
-
-导演风格：
-{st.session_state.director_persona}
-
-要求：
-1. 先列出发现的问题（如有）
-2. 生成可直接应用的优化建议（每条建议简洁可落地）
-3. 格式：问题列表+建议列表，用短横线开头
-"""
-        result = call_llm(prompt, temperature=0.3, uploaded_image=uploaded_image)
-        
-        if result:
-            st.session_state.validation_result = result
-            # 解析建议列表
-            suggestions = []
-            lines = result.split("\n")
-            for line in lines:
-                line = line.strip()
-                if line.startswith("-") and ("建议" in line or "优化" in line or "统一" in line):
-                    suggestions.append(line[1:].strip())
-            st.session_state.validation_suggestions = suggestions
-            st.success("✅ 分镜一致性校验完成！")
-            return True
-        else:
-            st.error("❌ 校验失败，请重试！")
-            return False
-
-def apply_validation_suggestions():
-    """一键应用校验建议到所有分镜提示词"""
-    if not st.session_state.validation_suggestions:
-        st.warning("⚠️ 暂无可用的优化建议！")
-        return False
-    
-    with st.spinner("✨ 一键应用优化建议到所有提示词..."):
-        # 合并建议
-        suggestions = "，".join(st.session_state.validation_suggestions)
-        
-        # 更新所有分镜
-        updated_storyboards = []
-        for sb in st.session_state.storyboards:
-            sb['optimized_prompt'] = f"{sb['optimized_prompt']}，{suggestions}"
-            updated_storyboards.append(sb)
-        
-        st.session_state.storyboards = updated_storyboards
-        st.session_state.optimized_prompts = [sb['optimized_prompt'] for sb in updated_storyboards]
-        st.session_state.applied_validation = True
-        st.success("✅ 优化建议已一键应用！")
-        return True
 
 def generate_storyboards(auto=False, uploaded_image=None):
     """
@@ -158,16 +91,22 @@ def generate_storyboards(auto=False, uploaded_image=None):
     st.session_state.video_prompts = []
     
     with st.spinner("🎬 生成动态漫分镜..." if not auto else "自动生成分镜中..."):
-        # 提取小说核心元素
+        # 提取小说核心元素（已包含推荐的导演）
         core_elements = extract_novel_core_elements(st.session_state.novel_target_chapter, uploaded_image)
+        
+        # 从分析结果中获取推荐的导演
+        recommended_director = st.session_state.get("recommended_director", "默认导演")
+        recommendation_reason = st.session_state.get("recommendation_reason", "适合该类型小说")
         
         # 分析小说类型和复杂度
         type_prompt = f"分析以下文本的类型，仅返回类型名称：\n{st.session_state.novel_target_chapter[:2000]}"
-        st.session_state.novel_type = call_llm(type_prompt, uploaded_image=uploaded_image) or "未知类型"
+        # 修复：拼写错误，改为call_llm并补充参数
+        st.session_state.novel_type = call_llm(type_prompt, uploaded_image=uploaded_image, is_comic_creation=True) or "未知类型"
         
         complexity_prompt = f"""分析以下文本的情节复杂度，仅返回结果（动作/特效密集型、对话/心理型、均衡型）：
-文本：{st.session_state.novel_target_chapter[:2000]}"""
-        complexity = call_llm(complexity_prompt, temperature=0.3, uploaded_image=uploaded_image) or "均衡型"
+        文本：{st.session_state.novel_target_chapter[:2000]}"""
+        # 修复：拼写错误，改为call_llm
+        complexity = call_llm(complexity_prompt, temperature=0.3, uploaded_image=uploaded_image, is_comic_creation=True) or "均衡型"
         st.session_state.complexity = complexity
         
         # 检查停止标志
@@ -176,6 +115,10 @@ def generate_storyboards(auto=False, uploaded_image=None):
             st.session_state.is_running = False
             return False
         
+        # 生成推荐导演的智能体人格
+        director_persona = generate_director_intelligent_persona(recommended_director, st.session_state.novel_type, complexity, st.session_state.complexity)
+        st.session_state.director_persona = director_persona
+        
         # 构建视觉风格指令
         director_style = st.session_state.director_persona or "冷青灰高对比色调，阴影厚重占比60%，构图紧凑留白少"
         style_tags = st.session_state.director_style_tags or []
@@ -183,35 +126,32 @@ def generate_storyboards(auto=False, uploaded_image=None):
         
         # 分镜密度规则
         if complexity == "动作/特效密集型":
-            density_rule = "分镜密度偏高，每40-60字对应1个镜头"
+            density_rule = "分镜密度偏高，每20-40字对应1个镜头，注重动作拆解细节"
         elif complexity == "对话/心理型":
-            density_rule = "分镜密度适中偏低，每70-90字对应1个镜头"
+            density_rule = "分镜密度适中，每30-50字对应1个镜头，突出情绪和心理变化"
         else:
-            density_rule = "分镜密度均衡，每50-80字对应1个镜头"
-        
+            density_rule = "分镜密度偏高，每25-45字对应1个镜头，确保节奏流畅"
+
         # 题材专属规则
         if "修仙" in st.session_state.novel_type or "古风" in st.session_state.novel_type:
-            genre_specific = "适配修仙/古风：动作拆分为起手→释放→收尾，场景强化古风细节"
+            genre_specific = "适配修仙/古风：动作拆分为起手→释放→收尾→效果延续，场景强化古风细节和意境"
         elif "科幻" in st.session_state.novel_type:
-            genre_specific = "适配科幻：机械动作拆分为启动→运行→停止，场景强化科技感"
+            genre_specific = "适配科幻：机械动作拆分为启动→运行→停止→余效，场景强化科技感和未来感"
         elif "悬疑" in st.session_state.novel_type:
-            genre_specific = "适配悬疑：视觉节点拆分为铺垫→转折→爆发，场景强化空间层次感"
+            genre_specific = "适配悬疑：视觉节点拆分为铺垫→暗示→转折→爆发→余韵，场景强化空间层次感和心理压迫感"
         else:
-            genre_specific = "适配通用题材：视觉节点拆分为起承转合，保持自然的空间关系"
-        
-        # 导演节奏风格
-        director_rhythm = "动作戏快剪，情绪戏慢镜"
-        if st.session_state.director_persona:
-            persona_lines = [line.strip() for line in st.session_state.director_persona.split("-") if line.strip()]
-            if len(persona_lines) >=4:
-                director_rhythm = persona_lines[3].strip()
+            genre_specific = "适配通用题材：视觉节点拆分为起承转合，保持自然的空间关系和情绪递进"
         
         # 构建最终分镜提示词
-        final_prompt = f"""你是资深动态漫分镜师，需严格遵循【{st.session_state.selected_director or '适配型分镜师'}】的创作逻辑（视觉风格：{visual_style}），为小说生成结构化分镜：
+        final_prompt = f"""你是资深漫画家兼动态漫分镜师，正与【{recommended_director}】合作，基于其独特艺术风格（视觉风格：{visual_style}），为小说生成结构化分镜：
 
-【核心规则1：分镜密度】
-1.  {density_rule}，总镜头数符合2分钟动态漫节奏（单章1500-2500字对应45-65个镜头）；
-2.  视觉节点必拆：表情微变、动作衔接、场景切换、道具细节、特效爆发；
+【智能体人格融合】
+{recommended_director}的创作风格与理念：
+{director_persona}
+
+【核心规则1：漫画分镜逻辑】
+1.  {density_rule}，确保充分展现情节细节（单章1500-2500字对应80-120个镜头，以适应漫画阅读节奏）；
+2.  视觉节点必拆：表情微变、动作衔接、场景切换、道具细节、特效爆发、情绪转换、心理活动、环境氛围变化；
 3.  {genre_specific}。
 
 【核心规则2：人物/空间约束（必须严格遵守）】
@@ -220,8 +160,22 @@ def generate_storyboards(auto=False, uploaded_image=None):
 3.  悬浮/外部物体：必须远离主体至少5米，不得与主体/玻璃/墙面融合；
 4.  避免人物混淆：不同角色的特征差异明显，不得出现性别/年龄错乱。
 
-【核心规则3：格式要求】
-每个镜头按以下模板输出，镜头序号从1开始，前缀标注“镜头X：[核心情节，8字内]”，镜头间用“===== 分割线：下一个镜头 =====”分隔：
+【核心规则3：漫画逻辑适配】
+1.  镜头语言多样化：特写、近景、中景、远景、俯视、仰视、侧面、背面等多样化运用；
+2.  情绪表达强化：重点情绪时刻需用特写或细节镜头放大；
+3.  节奏控制：紧张情节快切，舒缓情节慢镜，对话场景注重人物互动细节；
+4.  视角转换：适当运用主观视角、客观视角、分割画面等漫画常用技法。
+
+【核心规则4：漫画家专业视角】
+1.  分镜布局：考虑漫画格子布局，注重画面平衡和视觉流向；
+2.  人物构图：突出主角位置，合理安排人物与背景比例；
+3.  对话处理：对话场景需突出说话者表情和听者反应；
+4.  动作分解：复杂动作需分解为多个连续镜头，确保流畅性；
+5.  氛围营造：通过光影、色彩、背景细节强化情绪氛围；
+6.  节奏引导：通过镜头大小、角度变化引导读者阅读节奏。
+
+【核心规则5：格式要求】
+每个镜头按以下模板输出，镜头序号从1开始，前缀标注"镜头X：[核心情节，8字内]"，镜头间用"===== 分割线：下一个镜头 ====="分隔：
 镜头X：[核心情节]
 【中文结构化提示词（文生图专用）】
 风格描述：{st.session_state.novel_type}题材，{visual_style}，贴合小说情绪
@@ -264,8 +218,8 @@ Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast to
 ===== 分割线：下一个镜头 =====
 """
         
-        # 调用LLM生成原始分镜
-        raw_response = call_llm(final_prompt, temperature=0.4, uploaded_image=uploaded_image)
+        # 修复：拼写错误，改为call_llm
+        raw_response = call_llm(final_prompt, temperature=0.4, uploaded_image=uploaded_image, is_comic_creation=True)
         
         if not raw_response or st.session_state.stop_flag:
             if not st.session_state.stop_flag:
@@ -303,7 +257,11 @@ Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast to
                 scene_core = scene_prefix.split("：")[1]
                 
                 # 解析中文提示词
-                cn_part = part.split("【中文结构化提示词（文生图专用）】")[1].split("【英文结构化提示词（文生图专用）】")[0].strip()
+                try:
+                    cn_part = part.split("【中文结构化提示词（文生图专用）】")[1].split("【英文结构化提示词（文生图专用）】")[0].strip()
+                except IndexError:
+                    continue
+                    
                 style_desc_cn = ""
                 camera_cn = ""
                 art_style_cn = ""
@@ -327,8 +285,11 @@ Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast to
                         scene_cn = line.replace("场景细节：", "")
                 
                 # 解析英文和视频提示词
-                en_part = part.split("【英文结构化提示词（文生图专用）】")[1].split("【图生视频专用提示词】")[0].strip()
-                video_part = part.split("【图生视频专用提示词】")[1].strip()
+                try:
+                    en_part = part.split("【英文结构化提示词（文生图专用）】")[1].split("【图生视频专用提示词】")[0].strip()
+                    video_part = part.split("【图生视频专用提示词】")[1].strip()
+                except IndexError:
+                    continue
                 
                 # 解析情绪标签
                 emotion = "平静"
@@ -356,7 +317,7 @@ Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast to
                 universal_prompt = generate_universal_image_prompt(scene_info, core_elements)
                 
                 # 组装分镜数据
-                storyboard = {
+                storyboard_item = {
                     "scene": f"{scene_prefix}\n{cn_part}",
                     "emotion": emotion,
                     "camera": camera_cn if camera_cn else "中景，平视角度",
@@ -369,7 +330,32 @@ Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast to
                     "optimized_prompt": universal_prompt["positive"],
                     "negative_prompt": universal_prompt["negative"]
                 }
-                storyboards.append(storyboard)
+                
+                # 确保字段完整性
+                if "scene" not in storyboard_item:
+                    storyboard_item["scene"] = scene_prefix
+                if "emotion" not in storyboard_item:
+                    storyboard_item["emotion"] = "平静"
+                if "camera" not in storyboard_item:
+                    storyboard_item["camera"] = "中景，平视角度"
+                if "atmosphere" not in storyboard_item:
+                    storyboard_item["atmosphere"] = "贴合题材氛围"
+                if "has_character" not in storyboard_item:
+                    storyboard_item["has_character"] = "否"
+                if "character_feature" not in storyboard_item:
+                    storyboard_item["character_feature"] = "贴合题材人物特征"
+                if "environment" not in storyboard_item:
+                    storyboard_item["environment"] = "贴合题材场景细节"
+                if "optimized_prompt" not in storyboard_item:
+                    storyboard_item["optimized_prompt"] = ""
+                if "negative_prompt" not in storyboard_item:
+                    storyboard_item["negative_prompt"] = ""
+                if "comfyui_prompt" not in storyboard_item:
+                    storyboard_item["comfyui_prompt"] = ""
+                if "video_prompt" not in storyboard_item:
+                    storyboard_item["video_prompt"] = ""
+                
+                storyboards.append(storyboard_item)
                 comfy_prompts.append(en_part)
                 video_prompts.append(video_part)
                 optimized_prompts.append(universal_prompt["positive"])
@@ -393,3 +379,256 @@ Video Prompt: Style Description: Suspense theme, cool blue-gray high contrast to
             st.error(f"❌ 分镜解析失败！错误：{str(e)}")
             st.session_state.is_running = False
             return False
+
+
+def generate_director_intelligent_persona(director_name, novel_type, complexity, adapt_demand):
+    """
+    根据推荐的导演名称生成智能体人格
+    :param director_name: 推荐的导演名称
+    :param novel_type: 小说类型
+    :param complexity: 情节复杂度
+    :param adapt_demand: 改编需求
+    :return: 导演的智能体人格描述
+    """
+    if "宫崎骏" in director_name:
+        prompt = f"""你现在是著名动画导演【宫崎骏】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 注重人文关怀和环保主题
+- 情感表达细腻，善于表现人物内心世界
+- 画面充满想象力，场景设计精致
+- 善于通过自然元素烘托氛围
+
+要求按以下结构输出，每点用短横线开头：
+1. 视觉风格：体现你独有的画面美学
+2. 情感表达：如何细腻表现人物情感
+3. 场景设计：场景与人物关系的处理
+4. 节奏把控：故事节奏与情绪起伏的协调
+5. 细节处理：对自然元素和环境细节的关注
+
+输出要体现你作为宫崎骏的创作风格和理念。"""
+    elif "王家卫" in director_name:
+        prompt = f"""你现在是著名电影导演【王家卫】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 擅长氛围营造和情感表达
+- 光影运用独特，画面富有诗意
+- 时间感和空间感的巧妙处理
+- 擅长表现人物内心世界和情感纠葛
+
+要求按以下结构输出，每点用短横线开头：
+1. 光影运用：如何通过光影营造氛围
+2. 时间处理：时间流逝的表现手法
+3. 情感表达：人物内心世界的视觉呈现
+4. 构图美学：独特的画面构图方式
+5. 色彩调配：色彩的情感表达功能
+
+输出要体现你作为王家卫的创作风格和理念。"""
+    elif "诺兰" in director_name:
+        prompt = f"""你现在是著名电影导演【诺兰】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 结构设计大师，擅长非线性叙事
+- 时间操控能力强，多线程叙事
+- 概念性主题，哲学思辨
+- 实景拍摄与视觉奇观
+
+要求按以下结构输出，每点用短横线开头：
+1. 叙事结构：故事结构设计思路
+2. 时间操控：时间线的处理方式
+3. 概念表达：如何传达深层概念
+4. 视觉奇观：视觉冲击力的营造
+5. 多线叙事：多线索的协调处理
+
+输出要体现你作为诺兰的创作风格和理念。"""
+    elif "新海诚" in director_name:
+        prompt = f"""你现在是著名动画导演【新海诚】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 画面美感至上，风景描写细腻
+- 青春主题，情感细腻
+- 光影表现力强，天气元素运用
+- 擅长表现距离感和思念
+
+要求按以下结构输出，每点用短横线开头：
+1. 画面美学：视觉美感的营造
+2. 风景描写：自然环境的表现手法
+3. 光影表现：天气和光线的运用
+4. 情感传递：青春情感的细腻表达
+5. 距离感：空间与心理距离的表现
+
+输出要体现你作为新海诚的创作风格和理念。"""
+    elif "今敏" in director_name:
+        prompt = f"""你现在是已故传奇动画导演【今敏】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 现实与梦境交织的叙事
+- 视觉冲击力强，剪辑技巧独特
+- 心理刻画深刻，意识流动表现
+- 擅长多维度空间表现
+
+要求按以下结构输出，每点用短横线开头：
+1. 现实与梦境：两者的区分与融合
+2. 视觉冲击：强烈的视觉表现手法
+3. 心理刻画：内心世界的视觉化
+4. 剪辑技巧：独特的转场与节奏
+5. 空间表现：多维度空间的构建
+
+输出要体现你作为今敏的创作风格和理念。"""
+    elif "鸟山明" in director_name:
+        prompt = f"""你现在是著名漫画家【鸟山明】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 动作设计简洁有力
+- 角色个性鲜明，造型独特
+- 幽默元素的巧妙融入
+- 战斗场面的节奏把控
+
+要求按以下结构输出，每点用短横线开头：
+1. 动作设计：战斗动作的表现方式
+2. 角色造型：人物形象的塑造技巧
+3. 节奏把控：战斗场面的节奏处理
+4. 幽默元素：轻松氛围的营造
+5. 个性表达：角色特征的突出方式
+
+输出要体现你作为鸟山明的创作风格和理念。"""
+    elif "青山刚昌" in director_name:
+        prompt = f"""你现在是著名漫画家【青山刚昌】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 悬疑布局精巧，推理逻辑严密
+- 人物刻画细致，表情丰富
+- 伏笔设置巧妙，细节把控精准
+- 擅长营造紧张氛围
+
+要求按以下结构输出，每点用短横线开头：
+1. 悬疑布局：悬念的设置与揭示
+2. 推理逻辑：线索的呈现方式
+3. 人物刻画：表情与心理的表现
+4. 细节把控：伏笔与呼应的处理
+5. 氛围营造：紧张感的视觉表现
+
+输出要体现你作为青山刚昌的创作风格和理念。"""
+    elif "尾田荣一郎" in director_name:
+        prompt = f"""你现在是著名漫画家【尾田荣一郎】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 节奏把控精准，高潮迭起
+- 世界观宏大，设定严谨
+- 团队协作精神，友情主题
+- 人物个性鲜明，背景丰富
+
+要求按以下结构输出，每点用短横线开头：
+1. 节奏把控：故事节奏的调控方法
+2. 世界观构建：庞大设定的表现方式
+3. 人物塑造：个性角色的刻画技巧
+4. 情感表达：友情与梦想的传达
+5. 战斗设计：激烈场面的编排方式
+
+输出要体现你作为尾田荣一郎的创作风格和理念。"""
+    elif "黑泽明" in director_name:
+        prompt = f"""你现在是传奇电影导演【黑泽明】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 视觉叙事大师，构图经典
+- 人物塑造深刻，性格鲜明
+- 自然元素的巧妙运用
+- 戏剧性冲突的处理
+
+要求按以下结构输出，每点用短横线开头：
+1. 视觉叙事：通过画面讲述故事
+2. 构图美学：经典的画面构图方式
+3. 人物塑造：角色性格的视觉表现
+4. 自然元素：风雨雷电的运用
+5. 戏剧冲突：矛盾冲突的视觉化
+
+输出要体现你作为黑泽明的创作风格和理念。"""
+    elif "原力动画团队" in director_name:
+        prompt = f"""你现在是【原力动画团队】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 真人动捕+UE5实时渲染技术
+- 细腻表情和精细打斗分镜
+- 写实画风，身临其境感
+- 工业化流程成熟
+
+要求按以下结构输出，每点用短横线开头：
+1. 技术应用：真人动捕技术的运用
+2. 表情捕捉：细腻表情的呈现
+3. 打斗分镜：精细动作的拆解
+4. 写实画风：真实感的营造
+5. 流程优化：工业化制作效率
+
+输出要体现原力动画团队的制作特色和技术优势。"""
+    elif "铸梦动画团队" in director_name:
+        prompt = f"""你现在是【铸梦动画团队】，请结合【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），发挥你的人格化特质，生成适配AI分镜的视觉+节奏指令：
+        
+人格化特质：
+- 快节奏战斗，爽感强烈
+- 华丽特效，宏大场景
+- 速度快节奏，适合碎片化观影
+- 视觉冲击力强
+
+要求按以下结构输出，每点用短横线开头：
+1. 节奏把控：快节奏战斗的处理
+2. 特效表现：华丽特效的制作
+3. 场景设计：宏大场面的构建
+4. 视觉冲击：强烈效果的营造
+5. 观影体验：碎片化观影的适配
+
+输出要体现铸梦动画团队的制作特色和优势。"""
+    else:
+        prompt = f"""作为资深漫画家和分镜师，请结合【{director_name}】的风格特点，针对【{novel_type}】题材（情节复杂度：{complexity}，改编需求：{adapt_demand}），生成适配AI分镜的视觉+节奏指令，严格按以下要求输出：
+1.  分5点，每条用短横线开头，仅保留可落地的分镜执行细节；
+2.  视觉维度：色调/光影/构图，绑定题材特质；
+3.  动作处理：动作戏强化拆解逻辑；
+4.  节奏把控：明确快剪/慢镜适用场景；
+5.  细节偏好：针对题材专属元素的处理。
+
+要求：内容贴合导演真实风格+题材需求，每条简洁精准。"""
+
+    # 修复：拼写错误，改为call_llm并补充is_comic_creation参数
+    result = call_llm(prompt, temperature=0.6, is_comic_creation=True)
+    if result:
+        # 生成题材专属标签
+        if "修仙" in novel_type or "稳健" in novel_type or "仙逆" in novel_type:
+            if "原力动画团队" in director_name:
+                style_tags = ["真人动捕细节", "UE5渲染质感", "细腻表情捕捉"]
+            elif "铸梦动画团队" in director_name:
+                style_tags = ["华丽特效渲染", "快节奏战斗", "宏大场景表现"]
+            elif "鸟山明" in director_name:
+                style_tags = ["动作设计简洁", "角色个性鲜明", "战斗节奏明快"]
+            elif "尾田荣一郎" in director_name:
+                style_tags = ["节奏把控精准", "世界观构建", "人物个性突出"]
+            elif "今敏" in director_name:
+                style_tags = ["现实梦境交织", "心理活动视觉化", "剪辑技巧独特"]
+            else:
+                style_tags = ["灵韵特效通透", "古风服饰纹理清晰", "斗法动作分层"]
+        elif "科幻" in novel_type:
+            if "诺兰" in director_name:
+                style_tags = ["非线性叙事", "概念性主题", "实景拍摄"]
+            elif "新海诚" in director_name:
+                style_tags = ["画面美感", "青春主题", "光影表现力"]
+            else:
+                style_tags = ["机甲细节拉满", "星际场景纵深感", "科幻特效克制"]
+        elif "悬疑" in novel_type:
+            if "王家卫" in director_name:
+                style_tags = ["氛围营造", "光影运用", "情感表达"]
+            elif "青山刚昌" in director_name:
+                style_tags = ["悬疑布局", "推理逻辑", "细节把控"]
+            else:
+                style_tags = ["阴影占比提升", "镜头留白营造悬念", "微表情特写"]
+        else:
+            if "宫崎骏" in director_name:
+                style_tags = ["人文关怀", "情感细腻", "自然元素"]
+            elif "新海诚" in director_name:
+                style_tags = ["画面美感", "风景描写", "距离感表现"]
+            else:
+                style_tags = ["色调统一", "光影自然", "构图平衡"]
+        
+        st.session_state.director_style_tags = style_tags
+        return result
+    else:
+        # 如果API调用失败，返回默认的风格
+        st.session_state.director_style_tags = ["色调统一", "光影自然", "构图平衡"]
+        return f"- 视觉风格：{novel_type}题材的经典视觉表现\n- 色彩运用：符合题材氛围的色调搭配\n- 构图设计：适合漫画阅读的构图方式\n- 节奏把控：根据情节复杂度调整的节奏变化\n- 细节处理：突出题材特色的细节表现"

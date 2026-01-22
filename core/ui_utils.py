@@ -1,5 +1,7 @@
 import uuid
 import streamlit as st
+import logging
+from .utils import API_PRESETS  # 从 utils.py 导入 API_PRESETS，避免重复定义
 
 def copy_to_clipboard_button(text, button_label="📋 复制", key_suffix=""):
     """
@@ -41,14 +43,15 @@ def copy_to_clipboard_button(text, button_label="📋 复制", key_suffix=""):
     # 优化复制成功提示（更醒目）
     if st.session_state.get(f"copy_status_{unique_key}", False):
         st.success("✅ 复制成功！", icon="📋")
-        # 3秒后自动清除提示
-        st.empty()
+        # 3秒后自动清除提示（用streamlit的empty+延时）
+        import time
+        time.sleep(3)
         st.session_state[f"copy_status_{unique_key}"] = False
+        st.rerun()
 
 def init_basic_config():
-    """初始化页面基础配置（优化CSS+页面设置）"""
+    """初始化页面基础配置（VS深色主题）"""
     # 日志配置
-    import logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -56,7 +59,7 @@ def init_basic_config():
     )
     st.session_state.logger = logging.getLogger(__name__)
     
-    # VS深色主题CSS（替换原有全部CSS）
+    # VS深色主题CSS
     st.markdown("""
     <style>
     /* 全局重置（VS深色基础） */
@@ -232,7 +235,7 @@ def init_basic_config():
     </style>
     """, unsafe_allow_html=True)
 
-    # 页面基础配置（保持不变）
+    # 页面基础配置
     st.set_page_config(
         page_title="🎬 导演级分镜生成器（小说漫改专属）",
         page_icon="🎬",
@@ -241,34 +244,26 @@ def init_basic_config():
     )
 
 def init_session_state():
-    """初始化会话状态（默认值）"""
+    """初始化会话状态（文本/图文模式配置完全独立）"""
+    # 定义默认状态（文本/图文模式配置分开）
     default_states = {
-        # API配置相关
+        # ========== 文本模式独立配置 ==========
         "text_mode_api_provider": "DeepSeek",
         "text_mode_api_key": "",
-        "text_mode_base_url": "https://api.deepseek.com/v1/chat/completions",
-        "text_mode_model": "deepseek-chat",
+        "text_mode_base_url": API_PRESETS["DeepSeek"]["base_url"],
+        "text_mode_model": API_PRESETS["DeepSeek"]["default_model"],
+        # ========== 图文模式独立配置 ==========
         "multimodal_mode_api_provider": "火山方舟（豆包）",
         "multimodal_mode_api_key": "",
-        "multimodal_mode_base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-        "multimodal_mode_model": "doubao-seed-1-8-251228",
+        "multimodal_mode_base_url": API_PRESETS["火山方舟（豆包）"]["base_url"],
+        "multimodal_mode_model": API_PRESETS["火山方舟（豆包）"]["default_model"],
         "multimodal_mode_image_url": "",
-        # 业务核心状态
-        "novel_type": "",
-        "novel_trait": "",
-        "adapt_demand": "",
-        "complexity": "",
-        "storyboards": [],
-        "comfyui_prompts": [],
-        "optimized_prompts": [],
-        "negative_prompt": "",
-        "video_prompts": [],
+        # ========== 其他业务状态 ==========
         "selected_mode": "text_mode",
         "is_running": False,
         "stop_flag": False,
         "expanded_prompt_idx": -1,
         "generate_mode": "手动模式",
-        # 小说基础信息
         "novel_title": "",
         "novel_author": "",
         "novel_background": "",    
@@ -279,16 +274,67 @@ def init_session_state():
         "selected_director": "",
         "director_style_tags": [],
         "director_radio": "",
-        # 小说核心元素缓存
         "novel_core_characters": [],
         "novel_core_scenes": [],
-        # 校验结果和应用状态
         "validation_result": "",
         "validation_suggestions": [],
-        "applied_validation": False
+        "applied_validation": False,
+        "storyboards": [],
+        "comfyui_prompts": [],
+        "optimized_prompts": [],
+        "negative_prompt": "",
+        "video_prompts": []
     }
     
-    # 初始化未定义的会话变量
+    # 核心逻辑：只初始化不存在的变量，绝不覆盖已有值
     for key, value in default_states.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+    # ========== 兜底逻辑：防止默认值丢失 ==========
+    # 文本模式兜底
+    if not st.session_state.text_mode_base_url.strip():
+        st.session_state.text_mode_base_url = API_PRESETS[st.session_state.text_mode_api_provider]["base_url"]
+    if not st.session_state.text_mode_model.strip():
+        st.session_state.text_mode_model = API_PRESETS[st.session_state.text_mode_api_provider]["default_model"]
+    
+    # 图文模式兜底
+    if not st.session_state.multimodal_mode_base_url.strip():
+        st.session_state.multimodal_mode_base_url = API_PRESETS[st.session_state.multimodal_mode_api_provider]["base_url"]
+    if not st.session_state.multimodal_mode_model.strip():
+        st.session_state.multimodal_mode_model = API_PRESETS[st.session_state.multimodal_mode_api_provider]["default_model"]
+
+def check_config_valid(mode: str) -> bool:
+    """校验指定模式的API配置是否有效"""
+    if mode == "text_mode":
+        return (
+            bool(st.session_state.text_mode_api_key.strip()) and
+            bool(st.session_state.text_mode_base_url.strip()) and
+            bool(st.session_state.text_mode_model.strip())
+        )
+    elif mode == "multimodal_mode":
+        return (
+            bool(st.session_state.multimodal_mode_api_key.strip()) and
+            bool(st.session_state.multimodal_mode_base_url.strip()) and
+            bool(st.session_state.multimodal_mode_model.strip())
+        )
+    return False
+
+def get_valid_config() -> dict:
+    """获取当前选中模式的有效配置"""
+    if st.session_state.selected_mode == "text_mode" and check_config_valid("text_mode"):
+        return {
+            "provider": st.session_state.text_mode_api_provider,
+            "api_key": st.session_state.text_mode_api_key,
+            "base_url": st.session_state.text_mode_base_url,
+            "model": st.session_state.text_mode_model
+        }
+    elif st.session_state.selected_mode == "multimodal_mode" and check_config_valid("multimodal_mode"):
+        return {
+            "provider": st.session_state.multimodal_mode_api_provider,
+            "api_key": st.session_state.multimodal_mode_api_key,
+            "base_url": st.session_state.multimodal_mode_base_url,
+            "model": st.session_state.multimodal_mode_model,
+            "image_url": st.session_state.multimodal_mode_image_url
+        }
+    return {}

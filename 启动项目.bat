@@ -1,12 +1,19 @@
 @echo off
-:: 切换到项目根目录（替换成你的项目实际路径）
-cd /d F:\ycf-sui
+cd /d "%~dp0"  # 切换到脚本所在目录
 
-:: 激活虚拟环境（如果用了虚拟环境，没有的话可以删除这一行）
-call .venv\Scripts\activate.bat
+:: 检查是否存在虚拟环境，如果存在则激活它
+if exist ".venv\Scripts\activate.bat" (
+    call .venv\Scripts\activate.bat
+) else if exist "venv\Scripts\activate.bat" (
+    call venv\Scripts\activate.bat
+) else (
+    echo Warning: No virtual environment found, using system Python
+)
 
-:: 运行Streamlit项目
-streamlit run app.py
+:: 运行Streamlit应用
+python -m streamlit run app.py --server.port 8503
 
-:: 防止窗口运行后自动关闭（可选）
-pause
+:: 如果出错，暂停以便查看错误信息
+if %errorlevel% neq 0 (
+    pause
+)
