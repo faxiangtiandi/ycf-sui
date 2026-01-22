@@ -632,3 +632,135 @@ def generate_director_intelligent_persona(director_name, novel_type, complexity,
         # 如果API调用失败，返回默认的风格
         st.session_state.director_style_tags = ["色调统一", "光影自然", "构图平衡"]
         return f"- 视觉风格：{novel_type}题材的经典视觉表现\n- 色彩运用：符合题材氛围的色调搭配\n- 构图设计：适合漫画阅读的构图方式\n- 节奏把控：根据情节复杂度调整的节奏变化\n- 细节处理：突出题材特色的细节表现"
+
+
+def validate_storyboard_consistency(uploaded_image=None):
+    """
+    验证分镜一致性并提供建议
+    :param uploaded_image: 参考图片
+    :return: 验证结果和建议
+    """
+    if not st.session_state.storyboards:
+        st.warning("⚠️ 请先生成分镜！")
+        return False
+
+    with st.spinner("🔍 校验分镜一致性..."):
+        # 构建分镜内容字符串
+        storyboards_content = ""
+        for idx, sb in enumerate(st.session_state.storyboards):
+            storyboards_content += f"镜头 {idx+1}: {sb.get('scene', '')}\n"
+            storyboards_content += f"情绪: {sb.get('emotion', '')}\n"
+            storyboards_content += f"镜头: {sb.get('camera', '')}\n"
+            storyboards_content += f"人物特征: {sb.get('character_feature', '')}\n"
+            storyboards_content += f"场景细节: {sb.get('environment', '')}\n\n"
+
+        # 构造验证提示词
+        validate_prompt = f"""请对以下分镜内容进行一致性校验，并提供优化建议：
+
+分镜内容：
+{storyboards_content}
+
+请从以下几个方面进行校验：
+1. 人物特征一致性：检查人物外观、服装、特征等是否在各镜头中保持一致
+2. 空间关系一致性：检查场景布局、物体位置、空间逻辑是否连贯
+3. 情绪和氛围一致性：检查情绪表达与故事节奏是否匹配
+4. 镜头语言连贯性：检查镜头切换是否自然流畅
+
+请按以下格式返回结果：
+- 发现的问题：列出发现的不一致之处
+- 优化建议：提供具体的修改建议
+- 总体评价：对分镜整体质量的简要评价
+
+请确保建议具有可操作性，并与原始小说内容保持一致。"""
+
+        result = call_llm(validate_prompt, temperature=0.5, uploaded_image=uploaded_image, is_comic_creation=True)
+
+        if result:
+            st.session_state.validation_result = result
+
+            # 解析建议并保存
+            suggestions = []
+            lines = result.split("\n")
+            for line in lines:
+                if line.strip().startswith("- ") and ("建议" in line or "优化" in line or "调整" in line or "统一" in line):
+                    suggestions.append(line.strip()[2:])  # 去掉 "- " 前缀
+
+            st.session_state.validation_suggestions = suggestions
+            st.session_state.applied_validation = False
+
+            st.success("✅ 分镜校验完成！")
+            return True
+        else:
+            st.error("❌ 分镜校验失败！")
+            return False
+
+
+def apply_validation_suggestions():
+    """
+    应用验证建议优化所有分镜
+    :return: 是否应用成功
+    """
+    if not st.session_state.validation_suggestions:
+        st.warning("⚠️ 无验证建议可供应用！")
+        return False
+
+    if not st.session_state.storyboards:
+        st.warning("⚠️ 无分镜数据！")
+        return False
+
+    with st.spinner("✨ 应用优化建议..."):
+        # 获取原始分镜数据
+        original_storyboards = st.session_state.storyboards.copy()
+
+        try:
+            # 使用验证建议和原始小说内容重新生成分镜
+            novel_content = st.session_state.novel_target_chapter
+            suggestions_text = "\n".join(st.session_state.validation_suggestions)
+
+            refine_prompt = f"""请根据原始小说内容和验证建议，优化以下分镜：
+
+原始小说内容：
+{novel_content}
+
+验证建议：
+{suggestions_text}
+
+请重新生成与原始分镜数量相同的优化后分镜，确保：
+1. 保持原始故事内容和情节发展
+2. 应用验证建议解决发现的问题
+3. 保持分镜的连贯性和流畅性
+4. 优化人物特征、空间关系、情绪表达的一致性
+
+请使用与原始分镜相同的格式输出。"""
+
+            # 调用大模型重新生成优化后的分镜
+            refined_result = call_llm(refine_prompt, temperature=0.6, is_comic_creation=True)
+
+            if refined_result:
+                # 解析优化后的分镜
+                from core.coregenerator import parse_storyboards_from_raw
+                refined_storyboards = parse_storyboards_from_raw(
+                    refined_result, 
+                    core_elements=extract_novel_core_elements(novel_content)
+                )
+
+                # 如果解析成功，更新分镜数据
+                if refined_storyboards and len(refined_storyboards) > 0:
+                    st.session_state.storyboards = refined_storyboards
+                    st.session_state.applied_validation = True
+                    st.success("✅ 优化建议应用完成！")
+                    return True
+                else:
+                    # 如果解析失败，回滚到原始数据
+                    st.session_state.storyboards = original_storyboards
+                    st.error("❌ 优化后分镜解析失败，已回滚到原始数据！")
+                    return False
+            else:
+                st.session_state.storyboards = original_storyboards
+                st.error("❌ 优化建议应用失败，已回滚到原始数据！")
+                return False
+
+        except Exception as e:
+            st.session_state.storyboards = original_storyboards
+            st.error(f"❌ 应用优化建议时发生错误：{str(e)}，已回滚到原始数据！")
+            return False
